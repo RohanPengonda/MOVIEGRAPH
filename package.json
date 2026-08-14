@@ -1,0 +1,17 @@
+{
+  "name": "moviegraph",
+  "version": "1.0.0",
+  "description": "MovieGraph - Actor & Movie Relationship Explorer",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "seed": "cd backend && npm run seed",
+    "backend": "cd backend && npm start",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build"
+  }
+}
