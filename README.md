@@ -6,35 +6,66 @@ MovieGraph is a full-stack web application designed to showcase graph data model
 
 ---
 
-## 📸 Screenshots & Application States
+## 🎬 Demo
 
-### 1. Degrees of Separation (Flagship Feature)
-![Degrees of Separation](docs/screenshots/degrees-of-separation.png)
-*Displays shortest graph connection path (e.g. Kevin Bacon → Apollo 13 → Tom Hanks → Catch Me If You Can → Leonardo DiCaprio), visual interactive force graph, and natural language summary.*
-
-### 2. Actor Explorer & Insights Panel
-![Actor Explorer](docs/screenshots/actor-explorer.png)
-*Shows actor profile, filmography, direct collaborators, and graph-derived metrics (total movies, collaborators, top collaborator).*
-
-### 3. Hidden Collaborators ("SQL Would Hate This")
-![Hidden Collaborators](docs/screenshots/hidden-collaborators.png)
-*Displays actors sharing $\ge 3$ co-stars in common who have never acted in a movie together directly.*
-
-### 4. Database Disconnected & Empty States
-![Database Disconnected Banner](docs/screenshots/error-banner.png)
-*Graceful connection failure handling with status alert badge, diagnostic details, and retry button.*
+<video src="MovieGraph.mp4" width="100%" controls autoplay muted loop>
+  Your browser does not support the video tag.
+</video>
 
 ---
 
 ## ⚡ Why a Graph Database? (SQL vs. openCypher)
 
-The core requirement of Feature 3 (**Hidden Collaborators**) is finding actors who share $\ge 3$ co-stars in common but have **never worked together directly**.
+This application has three core features. Every single one of them is a **relationship-first problem** — and that is exactly where relational databases break down and graph databases thrive.
 
-### Relational SQL Query (Multiple Self-Joins & Anti-Joins)
-In a relational database with `actors`, `movies`, and `cast_members(actor_id, movie_id)` junction table:
+### The Fundamental Problem with SQL for Relationship Queries
+
+A relational database stores data in flat tables. Relationships between entities are represented as foreign keys and junction tables. To answer a question like *"find the shortest connection between two actors through shared movies"*, SQL must perform **recursive self-joins** — joining a table against itself multiple times, once per hop. Each additional degree of separation multiplies the query complexity exponentially.
+
+This is not a query-writing problem. It is a **data model mismatch**. SQL was designed for aggregating rows, not traversing networks.
+
+---
+
+### Feature-by-Feature Comparison
+
+#### Feature 1 — Degrees of Separation (Shortest Path)
+
+Finding the shortest path between two actors through shared movies is a classic graph traversal problem. In SQL this requires a recursive CTE (Common Table Expression) that re-joins the cast table at every depth level:
 
 ```sql
-SELECT c3.actor_id AS hidden_collaborator_id, COUNT(DISTINCT c2.actor_id) AS shared_costars
+-- SQL: Recursive shortest path — grows exponentially with depth
+WITH RECURSIVE path AS (
+  SELECT actor_id, movie_id, ARRAY[actor_id] AS visited, 1 AS depth
+  FROM cast_members WHERE actor_id = 'a6193'
+  UNION ALL
+  SELECT c.actor_id, c.movie_id, visited || c.actor_id, depth + 1
+  FROM cast_members c
+  JOIN path p ON c.movie_id = p.movie_id
+  WHERE c.actor_id <> ALL(visited) AND depth < 6
+)
+SELECT * FROM path WHERE actor_id = 'a2975' ORDER BY depth LIMIT 1;
+```
+
+This query scans the entire `cast_members` table at every recursion level. At depth 6 with a large cast table, this is millions of row comparisons.
+
+In CognoDB / Neo4j, the same query is one line:
+
+```cypher
+MATCH path = shortestPath((a:Actor {id: $actorId1})-[:ACTED_IN*..6]-(b:Actor {id: $actorId2}))
+RETURN path
+```
+
+The graph engine follows **index-free adjacency** — each node physically stores direct pointers to its neighboring nodes. Traversal is O(depth) pointer-following, not O(n²) table scanning. The graph size is irrelevant; only the local neighborhood is touched.
+
+---
+
+#### Feature 3 — Hidden Collaborators ("SQL Would Hate This")
+
+Finding actors who share ≥3 co-stars in common but have **never worked together directly** requires a two-hop traversal combined with a negative pattern check. In SQL:
+
+```sql
+-- SQL: 4 self-joins + correlated NOT EXISTS subquery
+SELECT c3.actor_id, COUNT(DISTINCT c2.actor_id) AS shared_costars
 FROM cast_members c1
 JOIN cast_members c2 ON c1.movie_id = c2.movie_id AND c2.actor_id <> c1.actor_id
 JOIN cast_members c3 ON c2.actor_id = c3.actor_id AND c3.actor_id <> c1.actor_id
@@ -48,10 +79,10 @@ GROUP BY c3.actor_id
 HAVING COUNT(DISTINCT c2.actor_id) >= 3
 ORDER BY shared_costars DESC LIMIT 10;
 ```
-*Disadvantages:* Requires 4 self-joins across large junction tables, expensive subqueries, and non-local scans.
 
-### openCypher Query (1 Declarative Traversal)
-In CognoDB / Neo4j:
+This query requires **4 self-joins** on the same junction table plus a correlated subquery that re-executes for every candidate row. The query planner cannot optimize the `NOT EXISTS` anti-join without a full scan.
+
+In openCypher, the same logic is a single declarative traversal:
 
 ```cypher
 MATCH (a:Actor {id: $actorId})-[:ACTED_IN]->(m:Movie)<-[:ACTED_IN]-(shared:Actor)
@@ -63,7 +94,27 @@ RETURN shared, commonMoviesCount, commonMovies
 ORDER BY commonMoviesCount DESC
 LIMIT 10
 ```
-*Advantages:* Index-free adjacency pointers traverse relationships directly in memory, executing in sub-milliseconds regardless of total graph size.
+
+The `NOT (pattern)` clause is a **native graph pattern negation** — the engine checks the absence of a relationship path directly in the adjacency structure without a subquery or additional table scan.
+
+---
+
+### Why the Performance Gap Widens at Scale
+
+| | Relational (SQL) | Graph (openCypher) |
+|---|---|---|
+| Data model | Tables + foreign keys | Nodes + typed relationships |
+| Relationship traversal | JOIN per hop — O(n²) per level | Pointer follow — O(1) per hop |
+| Shortest path | Recursive CTE, exponential growth | Native `shortestPath()`, linear |
+| Negative pattern | Correlated subquery, full scan | `NOT (pattern)`, adjacency check |
+| Schema flexibility | Rigid — new relationship = new table | Add relationship type, no migration |
+| Query readability | 30+ lines of self-joins | 6 lines of pattern matching |
+
+In a relational database, **every new degree of separation doubles the join cost**. In a graph database, adding more nodes to the graph does not slow down traversal of a specific actor's neighborhood — the engine only touches nodes reachable from the starting point.
+
+This is not a marginal improvement. For the Hidden Collaborators query on a dataset of 10,000 actors and 50,000 movies, the SQL version would require joining a 400,000-row junction table against itself four times. The Cypher version follows at most a few hundred relationship pointers from the target actor node.
+
+**The graph database is not just more convenient here — it is the architecturally correct tool for the problem.**
 
 ---
 
