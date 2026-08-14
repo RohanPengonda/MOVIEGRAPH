@@ -8,7 +8,7 @@ MovieGraph is a full-stack web application designed to showcase graph data model
 
 ## 🎬 Demo
 
-<video src="MovieGraph.mp4" width="100%" controls autoplay muted loop>
+<video src="MovieGraph-Demo.mp4" width="100%" controls autoplay muted loop>
   Your browser does not support the video tag.
 </video>
 
