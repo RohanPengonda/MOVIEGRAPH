@@ -6,6 +6,23 @@ MovieGraph is a full-stack web application designed to showcase graph data model
 
 ---
 
+## 🌐 Live Deployment
+
+| Service | URL |
+|---|---|
+| **Frontend** (Vercel) | https://moviegraph-frontend-psi.vercel.app/ |
+| **Backend API** (Render) | https://moviegraph-sy75.onrender.com/api/health |
+
+> **Note:** The backend is hosted on Render's free tier and may take ~30 seconds to wake up on the first request after a period of inactivity.
+
+---
+
+## 🎬 Demo
+
+<video src="MovieGraph.mp4" width="100%" controls autoplay muted loop>
+  Your browser does not support the video tag.
+</video>
+
 ---
 
 ## ⚡ Why a Graph Database? (SQL vs. openCypher)
